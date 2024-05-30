@@ -202,7 +202,7 @@ def global_motion_estimation(bf_path, af_path, target_path, bf_gray_path, af_gra
     seg_map[seg_map == 17] = 9
 
     # store the map for each image to the disk
-    f = open("./solution/model/m_%03d.txt" % curent_index, 'w')
+    f = open("./model_map/m_%03d.txt" % curent_index, 'w')
     for y in range(16, target_gray.shape[0], 16):
         for x in range(16, target_gray.shape[1], 16):
             f.write(str(seg_map[y-16, x-16]) + '\n')
@@ -235,6 +235,10 @@ def global_motion_estimation(bf_path, af_path, target_path, bf_gray_path, af_gra
     alpha = 0.5
     target_predict = cv.addWeighted(bf_predict, alpha, af_predict, 1 - alpha, 0)
 
+    for y in range(1900, target_predict.shape[0]):
+        for x in range(target_predict.shape[1]):
+            target_predict[y][x] = bf_predict[y][x]
+
     return target_predict
 
 ref = pd.read_csv('reference.csv')
@@ -249,4 +253,4 @@ for i in tqdm(range(len(ref['target']))):
     target_gray_path = './gt/%03d.png' % ref['target'][i]
 
     predict_frame = global_motion_estimation(bf_path, af_path, target_path, bf_gray_path, af_gray_path, target_gray_path, MODEL, int(ref['target'][i]))
-    cv.imwrite('./solution/img/%03d.png' % ref['target'][i], predict_frame)
+    cv.imwrite('./solution/%03d.png' % ref['target'][i], predict_frame)
