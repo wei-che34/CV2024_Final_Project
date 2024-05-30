@@ -16,7 +16,7 @@ def cal_psnr(pred_img, gt_img):
     #print(s.shape)
         mse = np.sum((s[i]-g[i])**2)
         #/s.size
-        psnr.append(10*np.log10(255/mse))
+        psnr.append(10*np.log10(255**2/mse))
 
     #psnr = np.array(psnr)
 
