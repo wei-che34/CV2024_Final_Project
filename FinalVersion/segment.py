@@ -83,7 +83,7 @@ print('download completed! loading DeepLab model...')
 MODEL = DeepLabModel(download_path)
 print('model loaded successfully!')
 
-def compute_M(seg_map, source_img_path, target_img_path, sift, bf):
+def compute_M(seg_map, source_seg_map, source_img_path, target_img_path, sift, bf):
     '''
     seg_map: segmentation map of the source image, a numpy array of shape (height, width)
     source_img_path: path to the source image
@@ -101,57 +101,39 @@ def compute_M(seg_map, source_img_path, target_img_path, sift, bf):
     gray_target = cv.cvtColor(target_img, cv.COLOR_BGR2GRAY)
 
     # Function to extract and match features for each label
-    def compute_transform(label, seg_map, gray_frame_0, gray_frame_16):
+    def compute_transform(label, source_seg_map, seg_map, gray_frame_0, gray_frame_16):
         mask = seg_map == label
-        keypoints_0, descriptors_0 = sift.detectAndCompute(gray_frame_0, mask.astype(np.uint8))
+        source_mask = source_seg_map == label
+        keypoints_0, descriptors_0 = sift.detectAndCompute(gray_frame_0, source_mask.astype(np.uint8))
         keypoints_16, descriptors_16 = sift.detectAndCompute(gray_frame_16, mask.astype(np.uint8))
-        try:
-            matches = bf.knnMatch(descriptors_16, descriptors_0, 4)
-            #matches = sorted(matches, key=lambda x: x.distance)
-            try:
-                #top_matches = matches[:int(len(matches) * 0.1)]
+            
+        matches = bf.match(descriptors_0, descriptors_16)
+        matches = sorted(matches, key=lambda x: x.distance)
 
-                if len(matches) >= 4:  # Minimum number of matches to estimate a transform
-                    pts_0 = np.float32([keypoints_0[m[0].queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                    pts_16 = np.float32([keypoints_16[m[1].trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-                    # estimate projective transform
-                    M, mask = cv.estimateAffinePartial2D(pts_0, pts_16)
-                #elif len(matches) >= 4:
-                #    pts_0 = np.float32([keypoints_0[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                #    pts_16 = np.float32([keypoints_16[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-                #    M, mask = cv.estimateAffinePartial2D(pts_0, pts_16)
-                else:
-                    print(f"Not engough matches for label {label}. Using identical transform.")
-                    M = np.eye(2,3)
-            except:
-                M = np.array([[1,0,0],[0,1,0]]).astype(np.float64)
-        except:
-            matches = bf.knnMatch(descriptors_0, descriptors_16, 4)
+        # only use the top 10% of matches
+        top_matches = matches[:int(len(matches) * 0.1)]
 
-            try:
-                #top_matches = matches[:int(len(matches) * 0.1)]
-                if len(matches) >= 4:  # Minimum number of matches to estimate a transform
-                    pts_0 = np.float32([keypoints_0[m[0].queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                    pts_16 = np.float32([keypoints_16[m[1].trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-                    # estimate projective transform
-                    M, mask = cv.estimateAffinePartial2D(pts_0, pts_16)
-                #elif len(matches) >= 4:
-                #    print(f"Warning: Not enough matches for label {label}. Using all {len(matches)} matches.")
-                #    pts_0 = np.float32([keypoints_0[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                #    pts_16 = np.float32([keypoints_16[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-                #    M, mask = cv.estimateAffinePartial2D(pts_0, pts_16)
-                else:
-                    print(f"Not engough matches for label {label}. Using identical transform.")
-                    M = np.eye(2,3)
-            except:
-                M = np.array([[1,0,0],[0,1,0]]).astype(np.float64)
-
+        if len(top_matches) >= 4:  # Minimum number of matches to estimate a transform
+            pts_0 = np.float32([keypoints_0[m.queryIdx].pt for m in top_matches]).reshape(-1, 1, 2)
+            pts_16 = np.float32([keypoints_16[m.trainIdx].pt for m in top_matches]).reshape(-1, 1, 2)
+            # estimate projective transform
+            M, mask = cv.estimateAffinePartial2D(pts_0, pts_16)
+        elif len(matches) >= 4:
+            print(f"Warning: Not enough matches for label {label}. Using all {len(matches)} matches.")
+            pts_0 = np.float32([keypoints_0[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+            pts_16 = np.float32([keypoints_16[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+            M, mask = cv.estimateAffinePartial2D(pts_0, pts_16)
+        else:
+            print(f"Not engough matches for label {label}. Using identical transform.")
+            M = np.eye(2,3)
+        
         return M
     
     # Compute transforms for each label
-    transforms = {label: compute_transform(label, seg_map, gray_source, gray_target) for label in unique_labels}
+    transforms = {label: compute_transform(label, source_seg_map, seg_map, gray_source, gray_target) for label in unique_labels}
 
     return transforms
+    
     
 def global_motion_estimation(bf_path, af_path, target_path, bf_gray_path, af_gray_path, target_gray_path, model, curent_index):
     '''
@@ -201,32 +183,101 @@ def global_motion_estimation(bf_path, af_path, target_path, bf_gray_path, af_gra
     seg_map[seg_map == 13] = 8
     seg_map[seg_map == 17] = 9
 
+    bf_seg_map = model.run(Image.open(bf_path))
+    for y in range(16, target_gray.shape[0], 16):
+        for x in range(16, target_gray.shape[1], 16):
+            seperate = bf_seg_map[y-16:y, x-16:x]
+            seperate = seperate.reshape(256)
+            counts = np.bincount(seperate)
+            bf_seg_map[y-16: y, x-16: x] = np.argmax(counts)
+
+    # constrain the seg_map to have only 12 labels
+    # combine the labels 2, 3, 14
+    bf_seg_map[bf_seg_map == 3] = 2
+    bf_seg_map[bf_seg_map == 14] = 2
+    # combine the labels 1, 4
+    bf_seg_map[bf_seg_map == 4] = 1
+    # combine the labels 6, 7
+    bf_seg_map[bf_seg_map == 7] = 6
+    # combine the labes 11, 12
+    bf_seg_map[bf_seg_map == 12] = 11
+    # combine the labels 13, 15, 16
+    bf_seg_map[bf_seg_map == 15] = 13
+    bf_seg_map[bf_seg_map == 16] = 13
+    # combine the labels 17, 18
+    bf_seg_map[bf_seg_map == 18] = 17
+
+    bf_seg_map[bf_seg_map == 5] = 3
+    bf_seg_map[bf_seg_map == 6] = 4
+    bf_seg_map[bf_seg_map == 8] = 5
+    bf_seg_map[bf_seg_map == 10] = 6
+    bf_seg_map[bf_seg_map == 11] = 7
+    bf_seg_map[bf_seg_map == 13] = 8
+    bf_seg_map[bf_seg_map == 17] = 9
+
+    af_seg_map = model.run(Image.open(af_path))
+    for y in range(16, target_gray.shape[0], 16):
+        for x in range(16, target_gray.shape[1], 16):
+            seperate = af_seg_map[y-16:y, x-16:x]
+            seperate = seperate.reshape(256)
+            counts = np.bincount(seperate)
+            af_seg_map[y-16: y, x-16: x] = np.argmax(counts)
+
+    # constrain the seg_map to have only 12 labels
+    # combine the labels 2, 3, 14
+    af_seg_map[af_seg_map == 3] = 2
+    af_seg_map[af_seg_map == 14] = 2
+    # combine the labels 1, 4
+    af_seg_map[af_seg_map == 4] = 1
+    # combine the labels 6, 7
+    af_seg_map[af_seg_map == 7] = 6
+    # combine the labes 11, 12
+    af_seg_map[af_seg_map == 12] = 11
+    # combine the labels 13, 15, 16
+    af_seg_map[af_seg_map == 15] = 13
+    af_seg_map[af_seg_map == 16] = 13
+    # combine the labels 17, 18
+    af_seg_map[af_seg_map == 18] = 17
+
+    af_seg_map[af_seg_map == 5] = 3
+    af_seg_map[af_seg_map == 6] = 4
+    af_seg_map[af_seg_map == 8] = 5
+    af_seg_map[af_seg_map == 10] = 6
+    af_seg_map[af_seg_map == 11] = 7
+    af_seg_map[af_seg_map == 13] = 8
+    af_seg_map[af_seg_map == 17] = 9
+
     # store the map for each image to the disk
     f = open("./model_map/m_%03d.txt" % curent_index, 'w')
     for y in range(16, target_gray.shape[0], 16):
         for x in range(16, target_gray.shape[1], 16):
-            f.write(str(seg_map[y-16, x-16]) + '\n')
+            if(y<1900):
+                f.write(str(seg_map[y-16, x-16]) + '\n')
+            else:
+                f.write(str(10) + '\n')
     f.flush()
     f.close()
 
     # compute each M matrix for bf and af images' labels
     sift = cv.SIFT_create()
-    bf = cv.BFMatcher(cv.NORM_L2, crossCheck=False)
+    bf = cv.BFMatcher(cv.NORM_L2, crossCheck=True)
 
-    bf_M_dic = compute_M(seg_map, bf_gray_path, target_gray_path, sift, bf)
-    af_M_dic = compute_M(seg_map, af_gray_path, target_gray_path, sift, bf)
+    bf_M_dic = compute_M(seg_map, bf_seg_map, bf_gray_path, target_gray_path,   sift, bf)
+    af_M_dic = compute_M(seg_map, af_seg_map, af_gray_path, target_gray_path,   sift, bf)
 
     # tansform
     bf_predict = np.zeros_like(target_gray)
     af_predict = np.zeros_like(target_gray)
 
     for label, M in bf_M_dic.items():
+        print(M)
         mask = seg_map == label
         transformed_frame = cv.warpAffine(bf_gray, M, (bf_gray.shape[1], bf_gray.shape[0]))
         bf_predict[mask] = transformed_frame[mask]
 
     
     for label, M in af_M_dic.items():
+        print(M)
         mask = seg_map == label
         transformed_frame = cv.warpAffine(af_gray, M, (af_gray.shape[1], af_gray.shape[0]))
         af_predict[mask] = transformed_frame[mask]
@@ -237,13 +288,13 @@ def global_motion_estimation(bf_path, af_path, target_path, bf_gray_path, af_gra
 
     for y in range(1900, target_predict.shape[0]):
         for x in range(target_predict.shape[1]):
-            target_predict[y][x] = bf_predict[y][x]
+            target_predict[y][x] = bf_gray[y][x]
 
     return target_predict
 
 ref = pd.read_csv('reference.csv')
 for i in tqdm(range(len(ref['target']))):
-    print(f"start to process image{ref['target'][i]}\n")
+    print(f"start to process image{ref['target'][i]}")
     bf_path = './rgb_images/%03d.png' % ref['ref0'][i]
     af_path = './rgb_images/%03d.png' % ref['ref1'][i]
     target_path = './rgb_images/%03d.png' % ref['target'][i]
