@@ -1,0 +1,6 @@
+Before post processing:
+PSNR: 49.90995
+
+After post processing (We don't use any post procesing):
+PSNR: 49.90995
+Complexity: 0 MACs/pixel
