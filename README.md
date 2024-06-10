@@ -4,8 +4,8 @@ This is the readme file for final project of Computer Vision class.
 The goal of this project is to build a Global Motion Compensation system.
 
 ## Environment setup
-python == 3.8.19
-pip install -r requirements.txt
+- python == 3.8.19
+- pip install -r requirements.txt
 
 ## Step1 - create folder
 create 2 folders
