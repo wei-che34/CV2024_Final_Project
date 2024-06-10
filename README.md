@@ -15,7 +15,7 @@ create 2 folders
 ## Step2 - generate images and model map
 python3 segment.py
 
-## Step2 - generate selection map
+## Step3 - generate selection map
 python3 selection_map.py
 
 - The generated images and selection maps will be in the folder ./solution
