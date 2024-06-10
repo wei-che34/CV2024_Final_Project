@@ -5,7 +5,7 @@ The goal of this project is to build a Global Motion Compensation system.
 
 ## Environment setup
 python == 3.8.19
-use pip install -r requirements.txt
+pip install -r requirements.txt
 
 ## Step1 - create folder
 create 2 folders
