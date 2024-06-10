@@ -1,6 +1,5 @@
 # CV2024_Final_Project
 
-This is the readme file for final project of Computer Vision class. 
 The goal of this project is to build a Global Motion Compensation system.
 
 ## Environment setup
